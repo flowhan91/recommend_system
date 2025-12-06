@@ -1,0 +1,30 @@
+# 1. [보안 필수] API 키가 들어있는 파일 (절대 올리면 안 됨!)
+.env
+.env.local
+.env.*
+
+# 2. 파이썬 자동 생성 파일 (불필요함)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 3. 가상환경 폴더 (용량이 큼, 팀원마다 다름)
+venv/
+.venv/
+env/
+.env/
+
+# 4. 데이터 파일 (CSV나 엑셀 등은 DB에 있으니 올리지 않는 것 추천)
+*.csv
+*.xlsx
+*.json
+*.pkl
+
+# 5. 운영체제 및 에디터 설정 파일 (지저분함)
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# 6. 로그 파일
+*.log
