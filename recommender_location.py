@@ -6,8 +6,8 @@ import os
 import supabase
 from supabase import create_client
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+SUPABASE_URL = "https://gvtmqaakgyorevninbmt.supabase.co"
+SUPABASE_KEY = "sb_secret_WziBehEDoaGk4FOUGIYd5Q_qVJcs3Lj"
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # final_recommendations = get_recommendations(location_input)
