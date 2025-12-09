@@ -99,7 +99,7 @@ if __name__ == "__main__":
     results = recommender.get_similar_places(INPUT_PLACE_ID, top_k=5)
     
     if results:
-        print(f"\n✅ Top 5 Similar Places:")
+        print(f"\n Top 5 Similar Places:")
         print("-" * 60)
         for idx, item in enumerate(results, 1):
             print(f"{idx}. [{item['place_name_kr']}] (ID: {item['place_id']})")
