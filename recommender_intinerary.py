@@ -1,222 +1,172 @@
 import math
 import json
+import os
 import numpy as np
+from typing import List, Dict, Optional, Set
 from supabase import create_client, Client
 from sklearn.metrics.pairwise import cosine_similarity
+from dotenv import load_dotenv
 
-# Supabase Client Initialization
-url = "https://gvtmqaakgyorevninbmt.supabase.co"
-key = "sb_secret_WziBehEDoaGk4FOUGIYd5Q_qVJcs3Lj"
-supabase: Client = create_client(url, key)
+load_dotenv()
 
-# Fetch all places once when the module is imported
-response_all_places = (
-    supabase.table("Place")
-    .select("place_id, lat, lng, embedding")
-    .execute()
-)
-all_places = response_all_places.data
+PLACE_THEME_COLUMN = "recommended_for" 
 
-# Haversine Distance Function
-def haversine_distance(lat1, lon1, lat2, lon2):
-    R = 6371  # Radius of Earth in kilometers
+class RecommendationEngine:
+    def __init__(self):
+        self.url = "https://gvtmqaakgyorevninbmt.supabase.co"
+        self.key = "sb_secret_WziBehEDoaGk4FOUGIYd5Q_qVJcs3Lj"
+        self.supabase: Client = create_client(self.url, self.key)
+        self.all_places = self._fetch_all_places()
 
-    lat1_rad = math.radians(lat1)
-    lon1_rad = math.radians(lon1)
-    lat2_rad = math.radians(lat2)
-    lon2_rad = math.radians(lon2)
+    def _fetch_all_places(self) -> List[Dict]:
+        try:
+            query = f"place_id, lat, lng, embedding, name_kr, {PLACE_THEME_COLUMN}"
+            response = self.supabase.table("Place").select(query).execute()
+            return [p for p in response.data if p['lat'] is not None and p['lng'] is not None]
+        except Exception as e:
+            print(f"Error fetching places: {e}")
+            return []
 
-    dlon = lon2_rad - lon1_rad
-    dlat = lat2_rad - lat1_rad
+    def _haversine_vectorized(self, user_lat, user_lng, places_data, radius_km=1.5):
+        if not places_data: return []
+        R = 6371
+        u_lat_rad = math.radians(user_lat)
+        u_lng_rad = math.radians(user_lng)
+        lats = np.array([p['lat'] for p in places_data], dtype=float)
+        lngs = np.array([p['lng'] for p in places_data], dtype=float)
+        dlat = np.radians(lats) - u_lat_rad
+        dlng = np.radians(lngs) - u_lng_rad
+        a = np.sin(dlat/2)**2 + np.cos(u_lat_rad) * np.cos(np.radians(lats)) * np.sin(dlng/2)**2
+        c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1-a))
+        distances = R * c
+        nearby_indices = np.where(distances <= radius_km)[0]
+        return [places_data[i] for i in nearby_indices]
 
-    a = math.sin(dlat / 2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon / 2)**2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    def _normalize_tags(self, raw_data) -> Set[str]:
+        if not raw_data: return set()
+        normalized = set()
+        if isinstance(raw_data, list):
+            for item in raw_data: normalized.add(str(item).lower().strip())
+        elif isinstance(raw_data, str):
+            for part in raw_data.split(','): normalized.add(part.lower().strip())
+        return normalized
 
-    distance = R * c
-    return distance
+    def get_user_themes(self, user_id: str) -> Set[str]:
+        try:
+            response = self.supabase.table("Users").select("themes").eq("user_id", user_id).single().execute()
+            if response.data: return self._normalize_tags(response.data.get('themes'))
+            return set()
+        except: return set()
 
-# Function to get nearby places
-def get_nearby_places(input_data, all_places, haversine_distance, radius=1.5):
-    user_lat = input_data['lat']
-    user_lng = input_data['lng']
+    def get_itinerary_theme(self, itinerary_id: int) -> Set[str]:
+        try:
+            response = self.supabase.table("Itinerary").select("theme").eq("itinerary_id", itinerary_id).single().execute()
+            if response.data: return self._normalize_tags(response.data.get('theme'))
+            return set()
+        except: return set()
 
-    nearby_places = []
+    def _is_theme_match(self, active_themes: Set[str], place_info: Dict) -> bool:
+        # Used for Profile Boosting only
+        place_tags_set = self._normalize_tags(place_info.get(PLACE_THEME_COLUMN))
+        if not place_tags_set: return False
+        place_tags_joined = " ".join(place_tags_set)
+        for theme in active_themes:
+            if theme in place_tags_set or theme in place_tags_joined: return True
+        return False
 
-    for place in all_places:
-        if place['lat'] is not None and place['lng'] is not None:
-            place_lat = place['lat']
-            place_lng = place['lng']
-            distance = haversine_distance(user_lat, user_lng, place_lat, place_lng)
+    def get_user_profile_vector(self, user_id: str, active_themes: Set[str]) -> Optional[np.ndarray]:
+        try:
+            saved = self.supabase.table("SavedPlaces").select("place_id").eq("user_id", user_id).execute()
+            liked = self.supabase.table("LikedPlaces").select("place_id").eq("user_id", user_id).execute()
+            interaction_ids = {item['place_id'] for item in saved.data + liked.data}
+            if not interaction_ids: return None
+            
+            embeddings, weights = [], []
+            for p in self.all_places:
+                if p['place_id'] in interaction_ids and p['embedding']:
+                    try:
+                        emb = np.array(json.loads(p['embedding']))
+                        weight = 3.0 if self._is_theme_match(active_themes, p) else 1.0
+                        embeddings.append(emb)
+                        weights.append(weight)
+                    except: continue
+            
+            if not embeddings: return None
+            return np.average(embeddings, axis=0, weights=weights)
+        except: return None
 
-            if distance <= radius:
-                nearby_places.append(place)
+    def determine_anchor_location(self, itinerary_id, day_id, current_lat, current_lng):
+        try:
+            day_p = self.supabase.table("ItineraryPlace").select("place_id").eq("itinerary_id", itinerary_id).eq("day_id", day_id).execute()
+            if day_p.data: return self._get_place_coords(day_p.data[-1]['place_id'])
+            itin_p = self.supabase.table("ItineraryPlace").select("place_id").eq("itinerary_id", itinerary_id).execute()
+            if itin_p.data: return self._get_place_coords(itin_p.data[-1]['place_id'])
+        except: pass
+        return current_lat, current_lng
 
-    if not nearby_places:
-        print(f"No places found within a {radius}km radius.")
-        return []
-    else:
-        print(f"Found {len(nearby_places)} places within {radius}km.")
-        return nearby_places
+    def _get_place_coords(self, place_id):
+        res = self.supabase.table("Place").select("lat, lng").eq("place_id", place_id).single().execute()
+        return (res.data['lat'], res.data['lng']) if res.data else (0.0, 0.0)
 
-# Function to get user profile embeddings
-def get_user_profile_embeddings(user_id, all_places, supabase):
-    response_saved_places = (
-        supabase.table("SavedPlaces")
-        .select("place_id")
-        .eq("user_id", user_id)
-        .execute()
-    )
-    saved_place_ids = [item['place_id'] for item in response_saved_places.data]
-    # print(f"Saved Place IDs: {saved_place_ids}")
+    def recommend(self, input_data: Dict) -> List[Dict]:
+        anchor_lat, anchor_lng = self.determine_anchor_location(
+            input_data['itinerary_id'], input_data['day_id'], input_data['lat'], input_data['lng']
+        )
+        
+        nearby_places = self._haversine_vectorized(anchor_lat, anchor_lng, self.all_places, radius_km=1.5)
+        if not nearby_places: return []
 
-    response_liked_places = (
-        supabase.table("LikedPlaces")
-        .select("place_id")
-        .eq("user_id", user_id)
-        .execute()
-    )
-    liked_place_ids = [item['place_id'] for item in response_liked_places.data]
-    # print(f"Liked Place IDs: {liked_place_ids}")
+        user_themes = self.get_user_themes(input_data['user_id'])
+        itinerary_themes = self.get_itinerary_theme(input_data['itinerary_id'])
+        active_themes = user_themes.union(itinerary_themes)
+        
+        user_vector = self.get_user_profile_vector(input_data['user_id'], active_themes)
+        if user_vector is None: return []
 
-    combined_place_ids = list(set(saved_place_ids + liked_place_ids))
-    # print(f"Combined Unique Place IDs: {combined_place_ids}")
-
-    user_profile_embeddings = []
-
-    if not combined_place_ids:
-        print("No saved or liked places found for the user.")
-    else:
-        for place in all_places:
-            if place['place_id'] in combined_place_ids:
-                if place['embedding'] is not None:
-                    user_profile_embeddings.append(place['embedding'])
-
-        if not user_profile_embeddings:
-            print("No embeddings found for the saved/liked places.")
-
-    # print(f"Collected {len(user_profile_embeddings)} embeddings for saved/liked places.")
-    return user_profile_embeddings
-
-# Function to calculate recommendation scores
-def calculate_recommendation_scores(user_profile_embeddings, nearby_places):
-    user_profile_np_embeddings = []
-
-    if not user_profile_embeddings:
-        print("No user profile embeddings found to generate recommendations.")
-        average_user_embedding = None
-    else:
-        for emb_str in user_profile_embeddings:
-            try:
-                emb_list = json.loads(emb_str)
-                user_profile_np_embeddings.append(np.array(emb_list))
-            except json.JSONDecodeError:
-                print(f"Warning: Could not parse embedding string: {emb_str}")
-
-        if user_profile_np_embeddings:
-            average_user_embedding = np.mean(user_profile_np_embeddings, axis=0)
-            # print("Successfully created average user embedding.")
-        else:
-            print("No valid user profile embeddings found after parsing.")
-            average_user_embedding = None
-
-    recommended_places = []
-
-    if average_user_embedding is not None:
+        recommendations = []
+        user_vector_2d = user_vector.reshape(1, -1)
+        
         for place in nearby_places:
-            if place['embedding'] is not None:
-                try:
-                    place_emb_list = json.loads(place['embedding'])
-                    place_np_embedding = np.array(place_emb_list)
+            if not place.get('embedding'): continue
+            try:
+                place_vec = np.array(json.loads(place['embedding'])).reshape(1, -1)
+                sim = cosine_similarity(user_vector_2d, place_vec)[0][0]
 
-                    user_emb_2d = average_user_embedding.reshape(1, -1)
-                    place_emb_2d = place_np_embedding.reshape(1, -1)
+                # [NEW] Explicitly check which themes match for the CANDIDATE place
+                matched_list = []
+                place_tags_set = self._normalize_tags(place.get(PLACE_THEME_COLUMN))
+                place_tags_joined = " ".join(place_tags_set)
+                
+                for theme in active_themes:
+                    if theme in place_tags_set or theme in place_tags_joined:
+                        matched_list.append(theme)
 
-                    similarity = cosine_similarity(user_emb_2d, place_emb_2d)[0][0]
-
-                    recommended_places.append({
-                        'place_id': place['place_id'],
-                        'similarity_score': float(similarity),
-                        #'place_details': place -> 안보냄
-                    })
-                except json.JSONDecodeError:
-                    print(f"Warning: Could not parse place embedding string for place_id {place['place_id']}")
-
-        recommended_places.sort(key=lambda x: x['similarity_score'], reverse=True)
-
-        # print("\nTop Recommended Places:")
-        # for i, rec_place in enumerate(recommended_places):
-        #     if i < 10: # Print top 10 for brevity
-        #         print(f"Place ID: {rec_place['place_id']}, Similarity Score: {rec_place['similarity_score']:.4f}")
-    else:
-        print("Cannot calculate recommendations without an average user embedding.")
-    
-    return recommended_places
-
-# Function to get itinerary places
-def get_itinerary_places(itinerary_id, supabase):
-    response_itinerary_places = (
-        supabase.table("ItineraryPlace")
-        .select("place_id")
-        .eq("itinerary_id", itinerary_id)
-        .execute()
-    )
-    itinerary_place_ids = [item['place_id'] for item in response_itinerary_places.data]
-    # print(f"Itinerary Place IDs for itinerary {itinerary_id}: {itinerary_place_ids}")
-    return itinerary_place_ids
-
-# Function to exclude existing itinerary places
-def exclude_existing_itinerary_places(recommended_places, itinerary_place_ids):
-    filtered_recommendations = [
-        place for place in recommended_places 
-        if place['place_id'] not in itinerary_place_ids
-    ]
-    # print(f"Excluded {len(recommended_places) - len(filtered_recommendations)} places already in the itinerary.")
-    # print(f"Final Recommended Places (after exclusion): {len(filtered_recommendations)}")
-    return filtered_recommendations
-
-# Main recommendation function
-def recommend_next_place(input_data):
-    # 1. Filter places by proximity
-    # haversine_distance, all_places, supabase are now module-level variables/functions
-    nearby_places = get_nearby_places(input_data, all_places, haversine_distance)
-    if not nearby_places:
-        return "1.5km내 장소가 없습니다"
-
-    # 2. Generate user profile from saved/liked places
-    user_profile_embeddings = get_user_profile_embeddings(input_data['user_id'], all_places, supabase)
-    if not user_profile_embeddings:
-        return "저장하거나 좋아요한 장소가 없습니다"
-
-    # 3. Calculate recommendation scores
-    recommended_places = calculate_recommendation_scores(user_profile_embeddings, nearby_places)
-    if not recommended_places:
-        return "추천할 장소를 찾지 못했습니다."
-
-    # 4. Exclude existing itinerary places
-    itinerary_place_ids = get_itinerary_places(input_data['itinerary_id'], supabase)
-    final_recommendations = exclude_existing_itinerary_places(recommended_places, itinerary_place_ids)
-    
-    if not final_recommendations:
-        return "추천할 장소가 모두 여정에 등록된 장소입니다."
-    
-    return final_recommendations
+                recommendations.append({
+                    'place_id': place['place_id'],
+                    'place_name_kr': place.get('name_kr', 'Unknown'),
+                    'similarity_score': float(sim),
+                    'matched_themes': matched_list  # Result: ['shopping', 'food']
+                })
+            except: continue
+        
+        visited_res = self.supabase.table("ItineraryPlace").select("place_id").eq("itinerary_id", input_data['itinerary_id']).execute()
+        visited_ids = {item['place_id'] for item in visited_res.data}
+        
+        final_recs = [r for r in recommendations if r['place_id'] not in visited_ids]
+        final_recs.sort(key=lambda x: x['similarity_score'], reverse=True)
+        
+        return final_recs
 
 if __name__ == "__main__":
-    # Example input data
+    engine = RecommendationEngine()
     input_data = {
-        "user_id" : "USR_a7F9kP12",
-        "lat" : 35.149548 ,
-        "lng" : 126.922151,
-        "itinerary_id" : 108,
-        "day_id" : 3
+        "user_id" : "7efc9d982d34d46648ece81e972ebeddafc8c0b061708a6e5a0468c29419452c",
+        "lat" : 35.149548, "lng" : 126.922151, "itinerary_id" : 131, "day_id" : 148
     }
 
-    final_recommendations = recommend_next_place(input_data)
-
-    print("\n--- Final Recommendations --- ")
-    if isinstance(final_recommendations, str):
-        print(final_recommendations)
-    else:
-        for i, rec_place in enumerate(final_recommendations):
-            if i < 10: # Print top 10 for brevity
-                print(f"Place ID: {rec_place['place_id']}, Score: {rec_place['similarity_score']:.4f}")
+    results = engine.recommend(input_data)
+    
+    print("\n[Recommendation Results]")
+    for item in results:
+        # Now you can see matched themes in the print
+        print(f"ID: {item['place_id']} | Name: {item['place_name_kr']} | Match: {item['matched_themes']} | Score: {item['similarity_score']:.4f}")
