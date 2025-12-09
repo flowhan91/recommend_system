@@ -14,8 +14,8 @@ PLACE_THEME_COLUMN = "recommended_for"
 
 class LocationRecommendationEngine:
     def __init__(self):
-        self.url = os.getenv("SUPABASE_URL", "YOUR_SUPABASE_URL")
-        self.key = os.getenv("SUPABASE_KEY", "YOUR_SUPABASE_KEY")
+        self.url = "https://gvtmqaakgyorevninbmt.supabase.co"
+        self.key = "sb_secret_WziBehEDoaGk4FOUGIYd5Q_qVJcs3Lj"
         self.supabase: Client = create_client(self.url, self.key)
         
         # Load places
