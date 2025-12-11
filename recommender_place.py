@@ -14,8 +14,8 @@ load_dotenv()
 class SimilarPlaceRecommender:
     def __init__(self):
         # 환경 변수에서 키를 가져오거나, 없으면 직접 입력 (보안상 환경변수 권장)
-        self.url = os.getenv("SUPABASE_URL", "YOUR_SUPABASE_URL")
-        self.key = os.getenv("SUPABASE_KEY", "YOUR_SUPABASE_KEY")
+        self.url = "https://gvtmqaakgyorevninbmt.supabase.co"
+        self.key = "sb_secret_WziBehEDoaGk4FOUGIYd5Q_qVJcs3Lj"
         
         if "YOUR_SUPABASE" in self.url:
              print(" .env 파일이 없거나 키가 설정되지 않았습니다.")
@@ -92,7 +92,7 @@ if __name__ == "__main__":
     recommender = SimilarPlaceRecommender()
     
     # 테스트할 장소 ID 입력 (예: 특정 카페나 명소의 ID)
-    INPUT_PLACE_ID = 81  # 테스트용 ID, 실제 DB에 있는 ID로 변경 필요
+    INPUT_PLACE_ID = 323  # 테스트용 ID, 실제 DB에 있는 ID로 변경 필요
 
     print(f"\n🔍 Searching for places similar to Place ID: {INPUT_PLACE_ID}...")
     
