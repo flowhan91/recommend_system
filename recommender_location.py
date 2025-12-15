@@ -23,7 +23,6 @@ class LocationRecommendationEngine:
 
     def _fetch_all_places(self) -> List[Dict]:
         try:
-            # [수정됨] 컬럼명을 'name_kr'로 변경
             query = f"place_id, lat, lng, embedding, name_kr, {PLACE_THEME_COLUMN}"
             
             response = self.supabase.table("Place")\
