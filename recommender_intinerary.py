@@ -13,8 +13,8 @@ PLACE_THEME_COLUMN = "recommended_for"
 
 class RecommendationEngine:
     def __init__(self):
-        self.url = "https://gvtmqaakgyorevninbmt.supabase.co"
-        self.key = "sb_secret_WziBehEDoaGk4FOUGIYd5Q_qVJcs3Lj"
+        self.url = "deleted"
+        self.key = "deleted"
         self.supabase: Client = create_client(self.url, self.key)
         self.all_places = self._fetch_all_places()
 
