@@ -14,8 +14,8 @@ load_dotenv()
 class SimilarPlaceRecommender:
     def __init__(self):
         # 환경 변수에서 키를 가져오거나, 없으면 직접 입력 (보안상 환경변수 권장)
-        self.url = "https://gvtmqaakgyorevninbmt.supabase.co"
-        self.key = "sb_secret_WziBehEDoaGk4FOUGIYd5Q_qVJcs3Lj"
+        self.url = "deleted"
+        self.key = "deleted"
         
         if "YOUR_SUPABASE" in self.url:
              print(" .env 파일이 없거나 키가 설정되지 않았습니다.")
