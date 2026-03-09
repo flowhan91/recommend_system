@@ -40,17 +40,10 @@
 ### Machine Learning / Recommendation
 - scikit-learn
 - cosine similarity
-- embedding 기반 유사도 계산
 
 ### Database / Backend
 - PostgreSQL / Supabase
 - FastAPI (사용한 경우)
-
-### Visualization / Analysis
-- matplotlib
-- Jupyter Notebook
-
----
 
 ## 4. 추천 시스템 설계 방식
 
