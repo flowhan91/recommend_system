@@ -43,7 +43,7 @@
 
 ### Database / Backend
 - PostgreSQL / Supabase
-- FastAPI (사용한 경우)
+- FastAPI 
 
 ## 4. 추천 시스템 설계 방식
 
